@@ -22,7 +22,10 @@ add_test(NAME Stage1_MemTable COMMAND test_memtable)
 add_executable(test_wal src/memtable.cpp src/wal.cpp tests/test_wal.cpp)
 add_test(NAME Stage2_WAL COMMAND test_wal)
 
+# Stage 3: Immutable SSTables & Sparse Index
+add_executable(test_sstable src/memtable.cpp src/sstable.cpp tests/test_sstable.cpp)
+add_test(NAME Stage3_SSTable COMMAND test_sstable)
+
 # Remaining stages will be registered as each module is built:
-# - Stage 3: test_sstable
 # - Stage 4: test_forgekv
 # - Stage 5: test_compaction, forgekv_cli, bench_forgekv
