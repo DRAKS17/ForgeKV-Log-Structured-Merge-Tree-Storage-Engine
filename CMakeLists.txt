@@ -14,8 +14,11 @@ endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 enable_testing()
 
-# Stage targets will be registered step-by-step as each module is built:
-# - Stage 1: test_memtable
+# Stage 1: SkipList MemTable
+add_executable(test_memtable src/memtable.cpp tests/test_memtable.cpp)
+add_test(NAME Stage1_MemTable COMMAND test_memtable)
+
+# Remaining stages will be registered as each module is built:
 # - Stage 2: test_wal
 # - Stage 3: test_sstable
 # - Stage 4: test_forgekv
