@@ -55,4 +55,22 @@ inline uint64_t decode_u64(const char* src) {
     return val;
 }
 
+/// Compute standard IEEE 802.3 CRC32 checksum over a raw byte buffer.
+inline uint32_t crc32(const char* data, std::size_t length) {
+    uint32_t crc = 0xFFFFFFFFU;
+    for (std::size_t i = 0; i < length; ++i) {
+        crc ^= static_cast<uint8_t>(data[i]);
+        for (int bit = 0; bit < 8; ++bit) {
+            const uint32_t mask = (crc & 1U) ? 0xEDB88320U : 0U;
+            crc = (crc >> 1) ^ mask;
+        }
+    }
+    return ~crc;
+}
+
+/// Convenience overload to compute IEEE 802.3 CRC32 over a std::string.
+inline uint32_t crc32(const std::string& data) {
+    return crc32(data.data(), data.size());
+}
+
 }  // namespace forgekv

@@ -18,8 +18,11 @@ enable_testing()
 add_executable(test_memtable src/memtable.cpp tests/test_memtable.cpp)
 add_test(NAME Stage1_MemTable COMMAND test_memtable)
 
+# Stage 2: Binary WAL & CRC32 Crash Recovery
+add_executable(test_wal src/memtable.cpp src/wal.cpp tests/test_wal.cpp)
+add_test(NAME Stage2_WAL COMMAND test_wal)
+
 # Remaining stages will be registered as each module is built:
-# - Stage 2: test_wal
 # - Stage 3: test_sstable
 # - Stage 4: test_forgekv
 # - Stage 5: test_compaction, forgekv_cli, bench_forgekv
