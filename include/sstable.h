@@ -1,5 +1,6 @@
 #pragma once
 
+#include "bloom_filter.h"
 #include "common.h"
 #include "memtable.h"
 
@@ -76,8 +77,9 @@ public:
     static std::unique_ptr<SSTableReader> open(const std::string& filepath,
                                                uint64_t sequence_number = 0);
 
-    /// Point lookup using Sparse Index binary search + one bounded sequential disk read.
-    std::optional<ValueEntry> get(const std::string& key) const;
+    /// Point lookup using Bloom Filter gate + Sparse Index binary search + 1 disk read.
+    std::optional<ValueEntry> get(const std::string& key,
+                                  bool use_bloom = true) const;
 
     /// Range scan returning all entries (including tombstones) in [start_key, end_key].
     std::vector<std::pair<std::string, ValueEntry>> scan(
@@ -94,15 +96,23 @@ public:
     uint64_t file_size() const { return file_size_; }
     std::size_t sparse_index_size() const { return sparse_index_.size(); }
 
+    /// Number of negative lookups short-circuited by the Bloom Filter.
+    uint64_t bloom_hits() const { return bloom_hits_.load(); }
+    /// Number of bounded disk reads executed.
     uint64_t disk_reads() const { return disk_reads_.load(); }
-    void reset_stats() const { disk_reads_.store(0); }
+    void reset_stats() const {
+        bloom_hits_.store(0);
+        disk_reads_.store(0);
+    }
 
 private:
     SSTableReader(std::string filepath,
                   uint64_t sequence_number,
                   uint64_t file_size,
                   uint64_t index_offset,
-                  std::vector<SparseIndexEntry> sparse_index);
+                  std::vector<SparseIndexEntry> sparse_index,
+                  BloomFilter bloom_filter,
+                  bool has_bloom);
 
     uint64_t find_start_offset(const std::string& key, std::size_t* out_idx = nullptr) const;
 
@@ -111,6 +121,9 @@ private:
     uint64_t file_size_;
     uint64_t index_offset_;
     std::vector<SparseIndexEntry> sparse_index_;
+    BloomFilter bloom_filter_;
+    bool has_bloom_ = false;
+    mutable std::atomic<uint64_t> bloom_hits_{0};
     mutable std::atomic<uint64_t> disk_reads_{0};
 };
 

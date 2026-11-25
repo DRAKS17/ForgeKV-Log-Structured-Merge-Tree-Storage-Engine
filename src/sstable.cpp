@@ -34,9 +34,10 @@ void SSTableBuilder::build_from_entries(
     }
 
     std::vector<SparseIndexEntry> sparse_index;
+    BloomFilter bloom(entries.size(), 0.01);
     uint64_t current_offset = 0;
 
-    // 1. Write Data Block sequentially and sample every 16th key into Sparse Index.
+    // 1. Write Data Block sequentially, populate Bloom Filter & Sparse Index.
     for (std::size_t i = 0; i < entries.size(); ++i) {
         const std::string& key = entries[i].first;
         const ValueEntry& val_entry = entries[i].second;
@@ -44,6 +45,7 @@ void SSTableBuilder::build_from_entries(
             throw std::invalid_argument("SSTable cannot store an empty key");
         }
 
+        bloom.insert(key);
         if (i % SPARSE_INDEX_INTERVAL == 0) {
             sparse_index.push_back(SparseIndexEntry{key, current_offset});
         }
@@ -86,9 +88,14 @@ void SSTableBuilder::build_from_entries(
     }
     const uint64_t index_size = current_offset - index_offset;
 
-    // 3. Bloom Filter section (populated in Stage 4; 0 bytes for now).
-    const uint64_t bloom_offset = 0;
-    const uint64_t bloom_size = 0;
+    // 3. Write serialized Bloom Filter section.
+    const uint64_t bloom_offset = current_offset;
+    const std::vector<char> bloom_bytes = bloom.serialize();
+    if (!bloom_bytes.empty()) {
+        out.write(bloom_bytes.data(), static_cast<std::streamsize>(bloom_bytes.size()));
+        current_offset += bloom_bytes.size();
+    }
+    const uint64_t bloom_size = current_offset - bloom_offset;
 
     // 4. Write fixed 36-byte Footer.
     char footer[FOOTER_SIZE];
@@ -202,12 +209,16 @@ SSTableReader::SSTableReader(std::string filepath,
                              uint64_t sequence_number,
                              uint64_t file_size,
                              uint64_t index_offset,
-                             std::vector<SparseIndexEntry> sparse_index)
+                             std::vector<SparseIndexEntry> sparse_index,
+                             BloomFilter bloom_filter,
+                             bool has_bloom)
     : filepath_(std::move(filepath)),
       sequence_number_(sequence_number),
       file_size_(file_size),
       index_offset_(index_offset),
-      sparse_index_(std::move(sparse_index)) {}
+      sparse_index_(std::move(sparse_index)),
+      bloom_filter_(std::move(bloom_filter)),
+      has_bloom_(has_bloom) {}
 
 std::unique_ptr<SSTableReader> SSTableReader::open(const std::string& filepath,
                                                    uint64_t sequence_number) {
@@ -236,7 +247,8 @@ std::unique_ptr<SSTableReader> SSTableReader::open(const std::string& filepath,
 
     const uint64_t index_offset = decode_u64(footer + 0);
     const uint64_t index_size = decode_u64(footer + 8);
-    // bloom_offset (+16) and bloom_size (+24) will be loaded in Stage 4.
+    const uint64_t bloom_offset = decode_u64(footer + 16);
+    const uint64_t bloom_size = decode_u64(footer + 24);
     const uint32_t magic = decode_u32(footer + 32);
 
     if (magic != SSTABLE_MAGIC) {
@@ -244,6 +256,10 @@ std::unique_ptr<SSTableReader> SSTableReader::open(const std::string& filepath,
     }
     if (index_offset + index_size > file_size - FOOTER_SIZE) {
         throw std::runtime_error("Corrupted SSTable sparse index bounds in: " +
+                                 filepath);
+    }
+    if (bloom_offset + bloom_size > file_size - FOOTER_SIZE) {
+        throw std::runtime_error("Corrupted SSTable bloom filter bounds in: " +
                                  filepath);
     }
 
@@ -276,8 +292,22 @@ std::unique_ptr<SSTableReader> SSTableReader::open(const std::string& filepath,
         }
     }
 
+    // Load Bloom Filter into RAM.
+    BloomFilter bloom_filter;
+    bool has_bloom = false;
+    if (bloom_size > 0) {
+        std::vector<char> bloom_buf(static_cast<std::size_t>(bloom_size));
+        in.seekg(static_cast<std::streamoff>(bloom_offset), std::ios::beg);
+        if (!in.read(bloom_buf.data(), static_cast<std::streamsize>(bloom_size))) {
+            throw std::runtime_error("Failed reading Bloom Filter from: " + filepath);
+        }
+        bloom_filter = BloomFilter::deserialize(bloom_buf.data(), bloom_buf.size());
+        has_bloom = !bloom_filter.empty();
+    }
+
     return std::unique_ptr<SSTableReader>(new SSTableReader(
-        filepath, sequence_number, file_size, index_offset, std::move(sparse_index)));
+        filepath, sequence_number, file_size, index_offset,
+        std::move(sparse_index), std::move(bloom_filter), has_bloom));
 }
 
 uint64_t SSTableReader::find_start_offset(const std::string& key,
@@ -306,8 +336,13 @@ uint64_t SSTableReader::find_start_offset(const std::string& key,
     return sparse_index_[idx].offset;
 }
 
-std::optional<ValueEntry> SSTableReader::get(const std::string& key) const {
+std::optional<ValueEntry> SSTableReader::get(const std::string& key,
+                                             bool use_bloom) const {
     if (key.empty() || sparse_index_.empty()) {
+        return std::nullopt;
+    }
+    if (use_bloom && has_bloom_ && !bloom_filter_.possibly_contains(key)) {
+        bloom_hits_.fetch_add(1);
         return std::nullopt;
     }
     if (key < sparse_index_.front().key) {

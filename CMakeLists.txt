@@ -12,6 +12,7 @@ else()
 endif()
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+find_package(Threads REQUIRED)
 enable_testing()
 
 # Stage 1: SkipList MemTable
@@ -23,9 +24,20 @@ add_executable(test_wal src/memtable.cpp src/wal.cpp tests/test_wal.cpp)
 add_test(NAME Stage2_WAL COMMAND test_wal)
 
 # Stage 3: Immutable SSTables & Sparse Index
-add_executable(test_sstable src/memtable.cpp src/sstable.cpp tests/test_sstable.cpp)
+add_executable(test_sstable src/memtable.cpp src/bloom_filter.cpp src/sstable.cpp tests/test_sstable.cpp)
 add_test(NAME Stage3_SSTable COMMAND test_sstable)
 
+# Stage 4: Bloom Filter & Unified ForgeKV Engine
+add_executable(test_forgekv
+    src/memtable.cpp
+    src/wal.cpp
+    src/bloom_filter.cpp
+    src/sstable.cpp
+    src/forgekv.cpp
+    tests/test_forgekv.cpp
+)
+target_link_libraries(test_forgekv PRIVATE Threads::Threads)
+add_test(NAME Stage4_ForgeKV COMMAND test_forgekv)
+
 # Remaining stages will be registered as each module is built:
-# - Stage 4: test_forgekv
 # - Stage 5: test_compaction, forgekv_cli, bench_forgekv
