@@ -99,12 +99,12 @@ void test_forgekv_flushes_overwrites_deletes_and_scan() {
     // Small flush threshold (2 KB) to force multiple SSTables quickly.
     db.open(TEST_DB_DIR, 2048);
 
-    // Phase 1: Insert 300 keys (forces several SSTable flushes).
+    // Phase 1: Insert 300 keys (forces several SSTable flushes & auto-compaction).
     for (int i = 0; i < 300; ++i) {
         db.put(pad_key(i), "v1_" + std::string(40, 'a' + (i % 26)));
     }
     auto st = db.stats();
-    ASSERT_TRUE(st.sstable_count >= 3);
+    ASSERT_TRUE(st.sstable_count >= 1 && st.sstable_count < 4);
 
     // Phase 2: Overwrite even keys and delete every 5th key (mix of flushed + MemTable).
     for (int i = 0; i < 300; ++i) {

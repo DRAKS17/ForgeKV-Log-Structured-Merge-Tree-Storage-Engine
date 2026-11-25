@@ -33,11 +33,44 @@ add_executable(test_forgekv
     src/wal.cpp
     src/bloom_filter.cpp
     src/sstable.cpp
+    src/compaction.cpp
     src/forgekv.cpp
     tests/test_forgekv.cpp
 )
 target_link_libraries(test_forgekv PRIVATE Threads::Threads)
 add_test(NAME Stage4_ForgeKV COMMAND test_forgekv)
 
-# Remaining stages will be registered as each module is built:
-# - Stage 5: test_compaction, forgekv_cli, bench_forgekv
+# Stage 5: Compaction, Interactive CLI, and Benchmark Suite
+add_executable(test_compaction
+    src/memtable.cpp
+    src/wal.cpp
+    src/bloom_filter.cpp
+    src/sstable.cpp
+    src/compaction.cpp
+    src/forgekv.cpp
+    tests/test_compaction.cpp
+)
+target_link_libraries(test_compaction PRIVATE Threads::Threads)
+add_test(NAME Stage5_Compaction COMMAND test_compaction)
+
+add_executable(forgekv_cli
+    src/memtable.cpp
+    src/wal.cpp
+    src/bloom_filter.cpp
+    src/sstable.cpp
+    src/compaction.cpp
+    src/forgekv.cpp
+    cli/forgekv_cli.cpp
+)
+target_link_libraries(forgekv_cli PRIVATE Threads::Threads)
+
+add_executable(bench_forgekv
+    src/memtable.cpp
+    src/wal.cpp
+    src/bloom_filter.cpp
+    src/sstable.cpp
+    src/compaction.cpp
+    src/forgekv.cpp
+    benchmarks/bench_forgekv.cpp
+)
+target_link_libraries(bench_forgekv PRIVATE Threads::Threads)

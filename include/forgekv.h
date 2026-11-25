@@ -35,6 +35,8 @@ struct EngineStats {
  */
 class ForgeKV {
 public:
+    static constexpr std::size_t DEFAULT_AUTO_COMPACT_THRESHOLD = 4;
+
     ForgeKV() = default;
     ~ForgeKV();
 
@@ -43,7 +45,8 @@ public:
 
     /// Open (or create) a database directory and replay any existing SSTables + WAL.
     void open(const std::string& dir,
-              std::size_t memtable_flush_bytes = 64 * 1024);
+              std::size_t memtable_flush_bytes = 64 * 1024,
+              std::size_t auto_compact_threshold = DEFAULT_AUTO_COMPACT_THRESHOLD);
 
     /// Insert or update a key-value pair (WAL-first, then MemTable, auto-flush).
     void put(const std::string& key, const std::string& value);
@@ -59,6 +62,9 @@ public:
     std::vector<std::pair<std::string, std::string>> scan(
         const std::string& start_key, const std::string& end_key) const;
 
+    /// Run K-way merge compaction across all SSTables to reclaim disk space.
+    void compact();
+
     /// Return current engine statistics.
     EngineStats stats() const;
 
@@ -72,6 +78,7 @@ public:
 
 private:
     void flush_memtable_unlocked();
+    void compact_unlocked();
     void close_unlocked();
     std::string format_sst_path(uint64_t sequence_number) const;
 
@@ -79,6 +86,7 @@ private:
     bool is_open_ = false;
     std::string data_dir_;
     std::size_t memtable_flush_bytes_ = 64 * 1024;
+    std::size_t auto_compact_threshold_ = DEFAULT_AUTO_COMPACT_THRESHOLD;
     uint64_t next_sst_seq_ = 1;
 
     std::unique_ptr<MemTable> memtable_;

@@ -1,5 +1,7 @@
 #include "forgekv.h"
 
+#include "compaction.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <filesystem>
@@ -60,7 +62,9 @@ ForgeKV::~ForgeKV() {
     close();
 }
 
-void ForgeKV::open(const std::string& dir, std::size_t memtable_flush_bytes) {
+void ForgeKV::open(const std::string& dir,
+                   std::size_t memtable_flush_bytes,
+                   std::size_t auto_compact_threshold) {
     std::unique_lock<std::shared_mutex> lock(rw_mutex_);
     if (is_open_) {
         close_unlocked();
@@ -68,6 +72,7 @@ void ForgeKV::open(const std::string& dir, std::size_t memtable_flush_bytes) {
 
     data_dir_ = dir;
     memtable_flush_bytes_ = std::max<std::size_t>(memtable_flush_bytes, 1024);
+    auto_compact_threshold_ = std::max<std::size_t>(auto_compact_threshold, 2);
     fs::create_directories(data_dir_);
 
     // Clean up any leftover .tmp files from an interrupted flush or compaction,
@@ -130,6 +135,51 @@ void ForgeKV::flush_memtable_unlocked() {
     sstables_.push_back(SSTableReader::open(sst_path, seq));
     memtable_->clear();
     wal_writer_->truncate();
+
+    if (sstables_.size() >= auto_compact_threshold_) {
+        compact_unlocked();
+    }
+}
+
+void ForgeKV::compact_unlocked() {
+    if (sstables_.empty()) {
+        return;
+    }
+
+    const uint64_t new_seq = next_sst_seq_++;
+    const std::string new_sst_path = format_sst_path(new_seq);
+
+    // Compact all SSTables together (bottom level => safe to purge tombstones).
+    const bool wrote_file = CompactionManager::compact(
+        sstables_, new_sst_path, /*is_bottom_level=*/true);
+
+    std::vector<std::string> old_paths;
+    old_paths.reserve(sstables_.size());
+    for (const auto& sst : sstables_) {
+        old_paths.push_back(sst->filepath());
+    }
+
+    std::vector<std::unique_ptr<SSTableReader>> compacted;
+    if (wrote_file) {
+        compacted.push_back(SSTableReader::open(new_sst_path, new_seq));
+    }
+    sstables_ = std::move(compacted);
+
+    for (const auto& old_path : old_paths) {
+        std::error_code ec;
+        fs::remove(old_path, ec);
+    }
+}
+
+void ForgeKV::compact() {
+    std::unique_lock<std::shared_mutex> lock(rw_mutex_);
+    if (!is_open_) {
+        throw std::runtime_error("ForgeKV engine is not open");
+    }
+    if (memtable_->entry_count() > 0) {
+        flush_memtable_unlocked();
+    }
+    compact_unlocked();
 }
 
 void ForgeKV::put(const std::string& key, const std::string& value) {
