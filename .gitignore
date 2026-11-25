@@ -1,0 +1,21 @@
+# Compiled binaries & object files
+*.exe
+*.o
+*.obj
+*.out
+*.a
+*.lib
+
+# Build directories
+build/
+cmake-build-*/
+
+# Local database scratch data (keep folder, ignore data files)
+data/*
+!data/.gitkeep
+
+# Editor / IDE files
+.vscode/
+.vs/
+*.swp
+.DS_Store
